@@ -261,7 +261,7 @@ class MainActivity : Activity() {
                         val pageWidth = 595
                         val pageHeight = 842
                         val page = document.startPage(PdfDocument.PageInfo.Builder(pageWidth, pageHeight, index + 1).create())
-                        val scale = minOf(pageWidth.toFloat() / bitmap.width, pageHeight.toFloat() / bitmap.height)
+                        val scale = minOf(1f, pageWidth.toFloat() / bitmap.width, pageHeight.toFloat() / bitmap.height)
                         val width = (bitmap.width * scale).toInt()
                         val height = (bitmap.height * scale).toInt()
                         val left = (pageWidth - width) / 2
