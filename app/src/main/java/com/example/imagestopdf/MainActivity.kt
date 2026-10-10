@@ -13,6 +13,7 @@ import android.os.Bundle
 import android.provider.OpenableColumns
 import android.view.Gravity
 import android.view.View
+import android.widget.FrameLayout
 import android.widget.Button
 import android.widget.ImageView
 import android.widget.LinearLayout
@@ -143,7 +144,21 @@ class MainActivity : Activity() {
                     setBackgroundColor(0xFFE2E6EF.toInt())
                     contentDescription = "Selected image ${index + 1}"
                 }
-                row.addView(preview, LinearLayout.LayoutParams(-1, dp(220)))
+                val previewFrame = FrameLayout(this)
+                previewFrame.addView(preview, FrameLayout.LayoutParams(-1, dp(220)))
+                previewFrame.addView(TextView(this).apply {
+                    text = "×"
+                    textSize = 28f
+                    gravity = Gravity.CENTER
+                    setTextColor(android.graphics.Color.WHITE)
+                    setBackgroundColor(0xCC172033.toInt())
+                    contentDescription = "Remove image ${index + 1}"
+                    setOnClickListener {
+                        selectedImages.remove(uri)
+                        refreshSelection()
+                    }
+                }, FrameLayout.LayoutParams(dp(48), dp(48), Gravity.TOP or Gravity.END))
+                row.addView(previewFrame, LinearLayout.LayoutParams(-1, dp(220)))
                 selectionList.addView(row)
                 executor.execute {
                     val thumbnail = try { loadThumbnail(uri) } catch (_: Exception) { null }
