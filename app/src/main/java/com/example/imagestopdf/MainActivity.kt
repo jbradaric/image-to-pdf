@@ -123,8 +123,7 @@ class MainActivity : Activity() {
                     for (i in 0 until clip.itemCount) picked.add(clip.getItemAt(i).uri)
                 } ?: data?.data?.let { picked.add(it) }
                 if (picked.isNotEmpty()) {
-                    selectedImages.clear()
-                    selectedImages.addAll(picked.distinct())
+                    selectedImages.addAll(picked.distinct().filterNot { it in selectedImages })
                     refreshSelection()
                 }
             }
