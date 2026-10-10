@@ -4,18 +4,9 @@ import android.app.Activity
 import android.content.Intent
 import android.content.res.ColorStateList
 import android.graphics.Bitmap
-import android.graphics.BitmapFactory
-import android.graphics.Color
-import android.graphics.ImageDecoder
-import android.graphics.Matrix
-import android.graphics.Paint
-import android.graphics.Rect
-import android.graphics.RectF
 import android.graphics.drawable.GradientDrawable
-import android.graphics.pdf.PdfDocument
 import android.net.Uri
 import android.os.Bundle
-import android.provider.OpenableColumns
 import android.view.Gravity
 import android.view.View
 import android.widget.ArrayAdapter
@@ -26,11 +17,12 @@ import android.widget.ScrollView
 import android.widget.Spinner
 import android.widget.TextView
 import android.widget.Toast
-import java.io.IOException
 import java.util.concurrent.Executors
 
 class MainActivity : Activity() {
     private val executor = Executors.newSingleThreadExecutor()
+    private val imageProcessor by lazy { ImageProcessor(applicationContext) }
+    private val pdfGenerator by lazy { PdfGenerator(applicationContext, imageProcessor) }
     private val selectedImages = mutableListOf<Uri>()
     private val imageFilters = mutableMapOf<Uri, ImageFilter>()
     private val imageRotations = mutableMapOf<Uri, Int>()
@@ -200,7 +192,7 @@ class MainActivity : Activity() {
                 }
                 row.addView(controls, LinearLayout.LayoutParams(0, -1, 1f))
                 controls.addView(TextView(this).apply {
-                    text = displayName(uri)
+                    text = imageProcessor.displayName(uri)
                     textSize = 13f
                     maxLines = 1
                     ellipsize = android.text.TextUtils.TruncateAt.END
@@ -262,8 +254,8 @@ class MainActivity : Activity() {
         executor.execute {
             var thumbnail: Bitmap? = null
             try {
-                thumbnail = loadThumbnail(uri)
-                if (filter != ImageFilter.NONE) applyFilter(thumbnail, filter)
+                thumbnail = imageProcessor.loadThumbnail(uri)
+                if (filter != ImageFilter.NONE) imageProcessor.applyFilter(thumbnail, filter)
             } catch (_: Exception) {
                 thumbnail?.recycle()
                 thumbnail = null
@@ -281,38 +273,6 @@ class MainActivity : Activity() {
         }
     }
 
-    private fun loadThumbnail(uri: Uri): Bitmap {
-        return if (android.os.Build.VERSION.SDK_INT >= 28) {
-            val source = ImageDecoder.createSource(contentResolver, uri)
-            ImageDecoder.decodeBitmap(source) { decoder, info, _ ->
-                val scale = 720f / maxOf(info.size.width, info.size.height)
-                decoder.setTargetSize((info.size.width * scale).toInt().coerceAtLeast(1), (info.size.height * scale).toInt().coerceAtLeast(1))
-                decoder.allocator = ImageDecoder.ALLOCATOR_SOFTWARE
-                decoder.setMutableRequired(true)
-            }
-        } else {
-            val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-            contentResolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it, null, bounds) }
-                ?: throw IOException("Unable to read image")
-            val sample = maxOf(1, maxOf(bounds.outWidth, bounds.outHeight) / 720)
-            contentResolver.openInputStream(uri)?.use {
-                BitmapFactory.decodeStream(it, null, BitmapFactory.Options().apply {
-                    inSampleSize = sample
-                    inMutable = true
-                })
-            } ?: throw IOException("Unable to decode image")
-        }
-    }
-
-    private fun displayName(uri: Uri): String = try {
-        contentResolver.query(uri, null, null, null, null)?.use { cursor ->
-            if (cursor.moveToFirst()) {
-                val index = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
-                if (index >= 0) cursor.getString(index) else null
-            } else null
-        } ?: uri.lastPathSegment ?: "Image"
-    } catch (_: Exception) { uri.lastPathSegment ?: "Image" }
-
     private fun writePdf(destination: Uri) {
         val images = selectedImages.map {
             PdfImage(it, imageFilters[it] ?: ImageFilter.NONE, imageRotations[it] ?: 0)
@@ -321,38 +281,8 @@ class MainActivity : Activity() {
         shareButton.isEnabled = false
         progress.text = "Creating PDF…"
         executor.execute {
-            var document: PdfDocument? = null
             try {
-                document = PdfDocument()
-                images.forEachIndexed { index, image ->
-                    var bitmap = loadBitmap(image.uri, PDF_RENDER_MAX_DIMENSION)
-                    try {
-                        if (image.filter != ImageFilter.NONE) applyFilter(bitmap, image.filter)
-                        if (image.rotation != 0) {
-                            val rotated = Bitmap.createBitmap(
-                                bitmap, 0, 0, bitmap.width, bitmap.height,
-                                Matrix().apply { postRotate(image.rotation.toFloat()) }, true
-                            )
-                            bitmap.recycle()
-                            bitmap = rotated
-                        }
-                        val pageWidth = 595
-                        val pageHeight = 842
-                        val page = document.startPage(PdfDocument.PageInfo.Builder(pageWidth, pageHeight, index + 1).create())
-                        val scale = minOf(1f, pageWidth.toFloat() / bitmap.width, pageHeight.toFloat() / bitmap.height)
-                        val width = (bitmap.width * scale).toInt()
-                        val height = (bitmap.height * scale).toInt()
-                        val left = (pageWidth - width) / 2
-                        val top = (pageHeight - height) / 2
-                        page.canvas.drawColor(Color.WHITE)
-                        page.canvas.drawBitmap(bitmap, null, Rect(left, top, left + width, top + height), Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG))
-                        document.finishPage(page)
-                    } finally {
-                        bitmap.recycle()
-                    }
-                }
-                contentResolver.openOutputStream(destination)?.use { document.writeTo(it) }
-                    ?: throw IOException("Unable to open the selected destination")
+                pdfGenerator.write(destination, images)
                 runOnUiThread {
                     lastCreatedPdf = destination
                     shareButton.isEnabled = true
@@ -365,69 +295,8 @@ class MainActivity : Activity() {
                     progress.text = "Couldn't create PDF: ${error.localizedMessage ?: "unknown error"}"
                     createButton.isEnabled = selectedImages.isNotEmpty()
                 }
-            } finally {
-                document?.close()
             }
         }
-    }
-
-    private fun applyFilter(bitmap: Bitmap, filter: ImageFilter) {
-        val width = bitmap.width
-        val height = bitmap.height
-        val pixels = IntArray(width * height)
-        bitmap.getPixels(pixels, 0, width, 0, 0, width, height)
-        when (filter) {
-            ImageFilter.NONE -> return
-            ImageFilter.GRAYSCALE -> for (i in pixels.indices) {
-                val gray = (Color.red(pixels[i]) * 299 + Color.green(pixels[i]) * 587 + Color.blue(pixels[i]) * 114) / 1000
-                pixels[i] = Color.rgb(gray, gray, gray)
-            }
-            ImageFilter.BLACK_AND_WHITE -> for (i in pixels.indices) {
-                val gray = (Color.red(pixels[i]) * 299 + Color.green(pixels[i]) * 587 + Color.blue(pixels[i]) * 114) / 1000
-                val value = if (gray >= 160) 255 else 0
-                pixels[i] = Color.rgb(value, value, value)
-            }
-            ImageFilter.AUTO_SCAN -> {
-                val stride = width + 1
-                val integral = LongArray(stride * (height + 1))
-                for (y in 0 until height) {
-                    var rowSum = 0L
-                    for (x in 0 until width) {
-                        val i = y * width + x
-                        val gray = (Color.red(pixels[i]) * 299 + Color.green(pixels[i]) * 587 + Color.blue(pixels[i]) * 114) / 1000
-                        rowSum += gray
-                        integral[(y + 1) * stride + x + 1] = integral[y * stride + x + 1] + rowSum
-                    }
-                }
-                val radius = (minOf(width, height) / 40).coerceAtLeast(12)
-                for (y in 0 until height) for (x in 0 until width) {
-                    val left = (x - radius).coerceAtLeast(0)
-                    val right = (x + radius + 1).coerceAtMost(width)
-                    val top = (y - radius).coerceAtLeast(0)
-                    val bottom = (y + radius + 1).coerceAtMost(height)
-                    val localSum = integral[bottom * stride + right] - integral[top * stride + right] -
-                        integral[bottom * stride + left] + integral[top * stride + left]
-                    val localMean = localSum / ((right - left) * (bottom - top))
-                    val i = y * width + x
-                    val color = pixels[i]
-                    val red = Color.red(color)
-                    val green = Color.green(color)
-                    val blue = Color.blue(color)
-                    val gray = (red * 299 + green * 587 + blue * 114) / 1000
-                    val saturation = maxOf(red, green, blue) - minOf(red, green, blue)
-                    val colorProtection = 1f - 0.8f * saturation / 255f
-                    val scanGray = (255f + (gray - localMean.toFloat()) * 1.25f).coerceIn(0f, 255f)
-                    val adjustedGray = (gray + (scanGray - gray) * colorProtection).toInt()
-                    val shift = adjustedGray - gray
-                    pixels[i] = Color.rgb(
-                        (red + shift).coerceIn(0, 255),
-                        (green + shift).coerceIn(0, 255),
-                        (blue + shift).coerceIn(0, 255)
-                    )
-                }
-            }
-        }
-        bitmap.setPixels(pixels, 0, width, 0, 0, width, height)
     }
 
     private fun sharePdf(uri: Uri) {
@@ -441,33 +310,6 @@ class MainActivity : Activity() {
             startActivity(Intent.createChooser(sendIntent, "Share PDF"))
         } catch (_: Exception) {
             Toast.makeText(this, "No app available to share this PDF", Toast.LENGTH_SHORT).show()
-        }
-    }
-
-    private fun loadBitmap(uri: Uri, maxDimension: Int): Bitmap {
-        return if (android.os.Build.VERSION.SDK_INT >= 28) {
-            val source = ImageDecoder.createSource(contentResolver, uri)
-            ImageDecoder.decodeBitmap(source) { decoder, info, _ ->
-                val longestSide = maxOf(info.size.width, info.size.height)
-                if (longestSide > maxDimension) {
-                    val scale = maxDimension.toFloat() / longestSide
-                    decoder.setTargetSize((info.size.width * scale).toInt().coerceAtLeast(1), (info.size.height * scale).toInt().coerceAtLeast(1))
-                }
-                decoder.allocator = ImageDecoder.ALLOCATOR_SOFTWARE
-                decoder.setMutableRequired(true)
-            }
-        } else {
-            val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-            contentResolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it, null, bounds) }
-                ?: throw IOException("Unable to read image")
-            var sample = 1
-            while (maxOf(bounds.outWidth, bounds.outHeight) / sample > maxDimension) sample *= 2
-            contentResolver.openInputStream(uri)?.use {
-                BitmapFactory.decodeStream(it, null, BitmapFactory.Options().apply {
-                    inSampleSize = sample
-                    inMutable = true
-                })
-            } ?: throw IOException("Unable to decode image")
         }
     }
 
@@ -501,14 +343,7 @@ class MainActivity : Activity() {
 
     private fun dp(value: Int): Int = (value * resources.displayMetrics.density).toInt()
 
-    private data class PdfImage(val uri: Uri, val filter: ImageFilter, val rotation: Int)
-
-    private enum class ImageFilter(val label: String) {
-        NONE("No filter"), GRAYSCALE("Grayscale"), BLACK_AND_WHITE("Black & white"), AUTO_SCAN("Auto scan (color)")
-    }
-
     companion object {
-        private const val PDF_RENDER_MAX_DIMENSION = 1684
         private const val REQUEST_PICK_IMAGES = 1
         private const val REQUEST_CREATE_PDF = 2
     }
