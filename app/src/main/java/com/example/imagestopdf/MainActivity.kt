@@ -34,9 +34,6 @@ class MainActivity : Activity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        window.statusBarColor = android.graphics.Color.WHITE
-        window.navigationBarColor = android.graphics.Color.WHITE
-        window.decorView.systemUiVisibility = View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR or View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR
         setContentView(makeContent())
         refreshSelection()
     }
@@ -45,18 +42,18 @@ class MainActivity : Activity() {
         val page = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(16), dp(20), dp(16), dp(12))
-            setBackgroundColor(0xFFF7F8FC.toInt())
+            setBackgroundColor(if (isDarkMode()) 0xFF121318.toInt() else 0xFFF7F8FC.toInt())
         }
         page.addView(TextView(this).apply {
             text = "Image to PDF"
             textSize = 28f
-            setTextColor(0xFF172033.toInt())
+            setTextColor(if (isDarkMode()) 0xFFF1F0F7.toInt() else 0xFF172033.toInt())
             setTypeface(null, android.graphics.Typeface.BOLD)
         })
         page.addView(TextView(this).apply {
             text = "Turn your pictures into a PDF, in the order you choose."
             textSize = 14f
-            setTextColor(0xFF60697A.toInt())
+            setTextColor(if (isDarkMode()) 0xFFBFC2CC.toInt() else 0xFF60697A.toInt())
             setPadding(0, dp(4), 0, dp(12))
         })
         page.addView(Button(this).apply {
@@ -81,7 +78,7 @@ class MainActivity : Activity() {
         page.addView(previewScroll, LinearLayout.LayoutParams(-1, 0, 1f))
         progress = TextView(this).apply {
             textSize = 13f
-            setTextColor(0xFF60697A.toInt())
+            setTextColor(if (isDarkMode()) 0xFFBFC2CC.toInt() else 0xFF60697A.toInt())
             setPadding(0, dp(4), 0, dp(4))
         }
         page.addView(progress)
@@ -138,13 +135,13 @@ class MainActivity : Activity() {
             selectionList.addView(TextView(this).apply {
                 text = "No images selected yet."
                 textSize = 16f
-                setTextColor(0xFF30394A.toInt())
+                setTextColor(if (isDarkMode()) 0xFFE2E2E9.toInt() else 0xFF30394A.toInt())
             })
         } else {
             selectionList.addView(TextView(this).apply {
                 text = "${selectedImages.size} image${if (selectedImages.size == 1) "" else "s"} selected"
                 textSize = 14f
-                setTextColor(0xFF30394A.toInt())
+                setTextColor(if (isDarkMode()) 0xFFE2E2E9.toInt() else 0xFF30394A.toInt())
                 setPadding(0, 0, 0, dp(8))
             })
             selectedImages.forEachIndexed { index, uri ->
@@ -159,7 +156,7 @@ class MainActivity : Activity() {
                 val previewFrame = FrameLayout(this)
                 val preview = ImageView(this).apply {
                     scaleType = ImageView.ScaleType.CENTER_CROP
-                    setBackgroundColor(0xFFE2E6EF.toInt())
+                    setBackgroundColor(if (isDarkMode()) 0xFF343640.toInt() else 0xFFE2E6EF.toInt())
                     contentDescription = "Selected image ${index + 1}"
                 }
                 previewFrame.addView(preview, FrameLayout.LayoutParams(-1, -1))
@@ -290,6 +287,10 @@ class MainActivity : Activity() {
                 ?: throw IOException("Unable to read image")
         }
     }
+
+    private fun isDarkMode(): Boolean =
+        resources.configuration.uiMode and android.content.res.Configuration.UI_MODE_NIGHT_MASK ==
+            android.content.res.Configuration.UI_MODE_NIGHT_YES
 
     private fun dp(value: Int): Int = (value * resources.displayMetrics.density).toInt()
 
