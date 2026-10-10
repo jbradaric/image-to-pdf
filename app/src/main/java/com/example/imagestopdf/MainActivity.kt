@@ -5,6 +5,7 @@ import android.content.Intent
 import android.content.res.ColorStateList
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.graphics.Color
 import android.graphics.ImageDecoder
 import android.graphics.Paint
 import android.graphics.Rect
@@ -15,11 +16,12 @@ import android.os.Bundle
 import android.provider.OpenableColumns
 import android.view.Gravity
 import android.view.View
-import android.widget.FrameLayout
+import android.widget.ArrayAdapter
 import android.widget.Button
 import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.ScrollView
+import android.widget.Spinner
 import android.widget.TextView
 import android.widget.Toast
 import java.io.IOException
@@ -28,6 +30,7 @@ import java.util.concurrent.Executors
 class MainActivity : Activity() {
     private val executor = Executors.newSingleThreadExecutor()
     private val selectedImages = mutableListOf<Uri>()
+    private val imageFilters = mutableMapOf<Uri, ImageFilter>()
     private lateinit var selectionList: LinearLayout
     private lateinit var createButton: Button
     private lateinit var shareButton: Button
@@ -174,38 +177,53 @@ class MainActivity : Activity() {
                 setTextColor(if (isDarkMode()) 0xFFE2E2E9.toInt() else 0xFF30394A.toInt())
                 setPadding(0, 0, 0, dp(8))
             })
-            val tileSize = (((resources.displayMetrics.widthPixels / resources.displayMetrics.density).toInt() - 48) / 3).coerceAtLeast(dp(72))
             selectedImages.forEachIndexed { index, uri ->
-                val column = index % 3
-                if (column == 0) {
-                    selectionList.addView(LinearLayout(this).apply {
-                        orientation = LinearLayout.HORIZONTAL
-                        tag = "preview-row"
-                    }, LinearLayout.LayoutParams(-1, tileSize).apply { bottomMargin = dp(8) })
+                val row = LinearLayout(this).apply {
+                    orientation = LinearLayout.HORIZONTAL
+                    gravity = Gravity.CENTER_VERTICAL
                 }
-                val row = selectionList.getChildAt(selectionList.childCount - 1) as LinearLayout
-                val previewFrame = FrameLayout(this)
+                selectionList.addView(row, LinearLayout.LayoutParams(-1, dp(88)).apply { bottomMargin = dp(8) })
                 val preview = ImageView(this).apply {
                     scaleType = ImageView.ScaleType.CENTER_CROP
                     setBackgroundColor(if (isDarkMode()) 0xFF343640.toInt() else 0xFFE2E6EF.toInt())
                     contentDescription = "Selected image ${index + 1}"
                 }
-                previewFrame.addView(preview, FrameLayout.LayoutParams(-1, -1))
-                previewFrame.addView(TextView(this).apply {
+                row.addView(preview, LinearLayout.LayoutParams(dp(72), dp(72)))
+                val controls = LinearLayout(this).apply {
+                    orientation = LinearLayout.VERTICAL
+                    gravity = Gravity.CENTER_VERTICAL
+                    setPadding(dp(10), 0, 0, 0)
+                }
+                row.addView(controls, LinearLayout.LayoutParams(0, -1, 1f))
+                controls.addView(TextView(this).apply {
+                    text = displayName(uri)
+                    textSize = 13f
+                    maxLines = 1
+                    ellipsize = android.text.TextUtils.TruncateAt.END
+                    setTextColor(if (isDarkMode()) 0xFFE2E2E9.toInt() else 0xFF30394A.toInt())
+                })
+                controls.addView(Spinner(this).apply {
+                    adapter = ArrayAdapter(this@MainActivity, android.R.layout.simple_spinner_dropdown_item, ImageFilter.entries.map { it.label })
+                    setSelection((imageFilters[uri] ?: ImageFilter.NONE).ordinal)
+                    onItemSelectedListener = object : android.widget.AdapterView.OnItemSelectedListener {
+                        override fun onNothingSelected(parent: android.widget.AdapterView<*>?) = Unit
+                        override fun onItemSelected(parent: android.widget.AdapterView<*>?, view: View?, position: Int, id: Long) {
+                            imageFilters[uri] = ImageFilter.entries[position]
+                        }
+                    }
+                })
+                row.addView(TextView(this).apply {
                     text = "×"
-                    textSize = 22f
+                    textSize = 26f
                     gravity = Gravity.CENTER
-                    setTextColor(android.graphics.Color.WHITE)
-                    setBackgroundColor(0xCC172033.toInt())
                     contentDescription = "Remove image ${index + 1}"
+                    setTextColor(if (isDarkMode()) 0xFFE2E2E9.toInt() else 0xFF30394A.toInt())
                     setOnClickListener {
                         selectedImages.remove(uri)
+                        imageFilters.remove(uri)
                         refreshSelection()
                     }
-                }, FrameLayout.LayoutParams(dp(36), dp(36), Gravity.TOP or Gravity.END))
-                row.addView(previewFrame, LinearLayout.LayoutParams(tileSize, tileSize).apply {
-                    if (column > 0) marginStart = dp(8)
-                })
+                }, LinearLayout.LayoutParams(dp(40), dp(48)))
                 executor.execute {
                     val thumbnail = try { loadThumbnail(uri) } catch (_: Exception) { null }
                     runOnUiThread {
@@ -247,7 +265,7 @@ class MainActivity : Activity() {
     } catch (_: Exception) { uri.lastPathSegment ?: "Image" }
 
     private fun writePdf(destination: Uri) {
-        val images = selectedImages.toList()
+        val images = selectedImages.map { it to (imageFilters[it] ?: ImageFilter.NONE) }
         createButton.isEnabled = false
         shareButton.isEnabled = false
         progress.text = "Creating PDF…"
@@ -255,9 +273,10 @@ class MainActivity : Activity() {
             var document: PdfDocument? = null
             try {
                 document = PdfDocument()
-                images.forEachIndexed { index, uri ->
-                    val bitmap = loadBitmap(uri)
+                images.forEachIndexed { index, (uri, filter) ->
+                    val bitmap = loadBitmap(uri, PDF_RENDER_MAX_DIMENSION)
                     try {
+                        if (filter != ImageFilter.NONE) applyFilter(bitmap, filter)
                         val pageWidth = 595
                         val pageHeight = 842
                         val page = document.startPage(PdfDocument.PageInfo.Builder(pageWidth, pageHeight, index + 1).create())
@@ -293,6 +312,53 @@ class MainActivity : Activity() {
         }
     }
 
+    private fun applyFilter(bitmap: Bitmap, filter: ImageFilter) {
+        val width = bitmap.width
+        val height = bitmap.height
+        val pixels = IntArray(width * height)
+        bitmap.getPixels(pixels, 0, width, 0, 0, width, height)
+        when (filter) {
+            ImageFilter.NONE -> return
+            ImageFilter.GRAYSCALE -> for (i in pixels.indices) {
+                val gray = (Color.red(pixels[i]) * 299 + Color.green(pixels[i]) * 587 + Color.blue(pixels[i]) * 114) / 1000
+                pixels[i] = Color.rgb(gray, gray, gray)
+            }
+            ImageFilter.BLACK_AND_WHITE -> for (i in pixels.indices) {
+                val gray = (Color.red(pixels[i]) * 299 + Color.green(pixels[i]) * 587 + Color.blue(pixels[i]) * 114) / 1000
+                val value = if (gray >= 160) 255 else 0
+                pixels[i] = Color.rgb(value, value, value)
+            }
+            ImageFilter.AUTO_SCAN -> {
+                val stride = width + 1
+                val integral = LongArray(stride * (height + 1))
+                for (y in 0 until height) {
+                    var rowSum = 0L
+                    for (x in 0 until width) {
+                        val i = y * width + x
+                        val gray = (Color.red(pixels[i]) * 299 + Color.green(pixels[i]) * 587 + Color.blue(pixels[i]) * 114) / 1000
+                        pixels[i] = gray
+                        rowSum += gray
+                        integral[(y + 1) * stride + x + 1] = integral[y * stride + x + 1] + rowSum
+                    }
+                }
+                val radius = (minOf(width, height) / 40).coerceAtLeast(12)
+                for (y in 0 until height) for (x in 0 until width) {
+                    val left = (x - radius).coerceAtLeast(0)
+                    val right = (x + radius + 1).coerceAtMost(width)
+                    val top = (y - radius).coerceAtLeast(0)
+                    val bottom = (y + radius + 1).coerceAtMost(height)
+                    val localSum = integral[bottom * stride + right] - integral[top * stride + right] -
+                        integral[bottom * stride + left] + integral[top * stride + left]
+                    val localMean = localSum / ((right - left) * (bottom - top))
+                    val gray = pixels[y * width + x] and 0xff
+                    val value = if (gray >= localMean - 12) 255 else 0
+                    pixels[y * width + x] = Color.rgb(value, value, value)
+                }
+            }
+        }
+        bitmap.setPixels(pixels, 0, width, 0, 0, width, height)
+    }
+
     private fun sharePdf(uri: Uri) {
         val sendIntent = Intent(Intent.ACTION_SEND).apply {
             type = "application/pdf"
@@ -307,15 +373,26 @@ class MainActivity : Activity() {
         }
     }
 
-    private fun loadBitmap(uri: Uri): Bitmap {
+    private fun loadBitmap(uri: Uri, maxDimension: Int): Bitmap {
         return if (android.os.Build.VERSION.SDK_INT >= 28) {
             val source = ImageDecoder.createSource(contentResolver, uri)
-            ImageDecoder.decodeBitmap(source) { decoder, _, _ ->
+            ImageDecoder.decodeBitmap(source) { decoder, info, _ ->
+                val longestSide = maxOf(info.size.width, info.size.height)
+                if (longestSide > maxDimension) {
+                    val scale = maxDimension.toFloat() / longestSide
+                    decoder.setTargetSize((info.size.width * scale).toInt().coerceAtLeast(1), (info.size.height * scale).toInt().coerceAtLeast(1))
+                }
                 decoder.allocator = ImageDecoder.ALLOCATOR_SOFTWARE
             }
         } else {
-            contentResolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it) }
+            val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+            contentResolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it, null, bounds) }
                 ?: throw IOException("Unable to read image")
+            var sample = 1
+            while (maxOf(bounds.outWidth, bounds.outHeight) / sample > maxDimension) sample *= 2
+            contentResolver.openInputStream(uri)?.use {
+                BitmapFactory.decodeStream(it, null, BitmapFactory.Options().apply { inSampleSize = sample })
+            } ?: throw IOException("Unable to decode image")
         }
     }
 
@@ -349,7 +426,12 @@ class MainActivity : Activity() {
 
     private fun dp(value: Int): Int = (value * resources.displayMetrics.density).toInt()
 
+    private enum class ImageFilter(val label: String) {
+        NONE("No filter"), GRAYSCALE("Grayscale"), BLACK_AND_WHITE("Black & white"), AUTO_SCAN("Auto scan (adaptive B&W)")
+    }
+
     companion object {
+        private const val PDF_RENDER_MAX_DIMENSION = 1684
         private const val REQUEST_PICK_IMAGES = 1
         private const val REQUEST_CREATE_PDF = 2
     }
