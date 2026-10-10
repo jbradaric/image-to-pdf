@@ -14,6 +14,7 @@ import android.provider.OpenableColumns
 import android.view.Gravity
 import android.view.View
 import android.widget.Button
+import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
@@ -24,7 +25,7 @@ import java.util.concurrent.Executors
 class MainActivity : Activity() {
     private val executor = Executors.newSingleThreadExecutor()
     private val selectedImages = mutableListOf<Uri>()
-    private lateinit var selectionSummary: TextView
+    private lateinit var selectionList: LinearLayout
     private lateinit var createButton: Button
     private lateinit var progress: TextView
 
@@ -58,7 +59,7 @@ class MainActivity : Activity() {
         page.addView(Button(this).apply {
             text = "Choose images"
             setOnClickListener {
-                val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
+                val intent = Intent(Intent.ACTION_GET_CONTENT).apply {
                     addCategory(Intent.CATEGORY_OPENABLE)
                     type = "image/*"
                     putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true)
@@ -66,12 +67,11 @@ class MainActivity : Activity() {
                 startActivityForResult(intent, REQUEST_PICK_IMAGES)
             }
         }, LinearLayout.LayoutParams(-1, dp(52)))
-        selectionSummary = TextView(this).apply {
-            textSize = 16f
-            setTextColor(0xFF30394A.toInt())
+        selectionList = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
             setPadding(0, dp(20), 0, dp(16))
         }
-        page.addView(selectionSummary)
+        page.addView(selectionList)
         progress = TextView(this).apply {
             textSize = 14f
             setTextColor(0xFF60697A.toInt())
@@ -117,14 +117,62 @@ class MainActivity : Activity() {
     }
 
     private fun refreshSelection() {
-        if (!::selectionSummary.isInitialized) return
-        selectionSummary.text = if (selectedImages.isEmpty()) {
-            "No images selected yet."
+        if (!::selectionList.isInitialized) return
+        selectionList.removeAllViews()
+        if (selectedImages.isEmpty()) {
+            selectionList.addView(TextView(this).apply {
+                text = "No images selected yet."
+                textSize = 16f
+                setTextColor(0xFF30394A.toInt())
+            })
         } else {
-            "${selectedImages.size} image${if (selectedImages.size == 1) "" else "s"} selected\n\n" +
-                selectedImages.mapIndexed { index, uri -> "${index + 1}. ${displayName(uri)}" }.joinToString("\n")
+            selectionList.addView(TextView(this).apply {
+                text = "${selectedImages.size} image${if (selectedImages.size == 1) "" else "s"} selected"
+                textSize = 16f
+                setTextColor(0xFF30394A.toInt())
+                setPadding(0, 0, 0, dp(12))
+            })
+            selectedImages.forEachIndexed { index, uri ->
+                val row = LinearLayout(this).apply {
+                    orientation = LinearLayout.HORIZONTAL
+                    gravity = Gravity.CENTER_VERTICAL
+                    setPadding(0, dp(6), 0, dp(6))
+                }
+                val preview = ImageView(this).apply {
+                    scaleType = ImageView.ScaleType.CENTER_CROP
+                    setBackgroundColor(0xFFE2E6EF.toInt())
+                    contentDescription = "Selected image ${index + 1}"
+                }
+                row.addView(preview, LinearLayout.LayoutParams(-1, dp(220)))
+                selectionList.addView(row)
+                executor.execute {
+                    val thumbnail = try { loadThumbnail(uri) } catch (_: Exception) { null }
+                    runOnUiThread {
+                        if (thumbnail != null && preview.parent != null) preview.setImageBitmap(thumbnail)
+                    }
+                }
+            }
         }
         createButton.isEnabled = selectedImages.isNotEmpty()
+    }
+
+    private fun loadThumbnail(uri: Uri): Bitmap {
+        return if (android.os.Build.VERSION.SDK_INT >= 28) {
+            val source = ImageDecoder.createSource(contentResolver, uri)
+            ImageDecoder.decodeBitmap(source) { decoder, info, _ ->
+                val scale = 480f / maxOf(info.size.width, info.size.height)
+                decoder.setTargetSize((info.size.width * scale).toInt().coerceAtLeast(1), (info.size.height * scale).toInt().coerceAtLeast(1))
+                decoder.allocator = ImageDecoder.ALLOCATOR_SOFTWARE
+            }
+        } else {
+            val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+            contentResolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it, null, bounds) }
+                ?: throw IOException("Unable to read image")
+            val sample = maxOf(1, maxOf(bounds.outWidth, bounds.outHeight) / 480)
+            contentResolver.openInputStream(uri)?.use {
+                BitmapFactory.decodeStream(it, null, BitmapFactory.Options().apply { inSampleSize = sample })
+            } ?: throw IOException("Unable to decode image")
+        }
     }
 
     private fun displayName(uri: Uri): String = try {
