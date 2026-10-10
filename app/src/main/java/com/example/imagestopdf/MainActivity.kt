@@ -144,13 +144,14 @@ class MainActivity : Activity() {
                 setTextColor(if (isDarkMode()) 0xFFE2E2E9.toInt() else 0xFF30394A.toInt())
                 setPadding(0, 0, 0, dp(8))
             })
+            val tileSize = (((resources.displayMetrics.widthPixels / resources.displayMetrics.density).toInt() - 48) / 3).coerceAtLeast(dp(72))
             selectedImages.forEachIndexed { index, uri ->
                 val column = index % 3
                 if (column == 0) {
                     selectionList.addView(LinearLayout(this).apply {
                         orientation = LinearLayout.HORIZONTAL
                         tag = "preview-row"
-                    }, LinearLayout.LayoutParams(-1, dp(112)).apply { bottomMargin = dp(8) })
+                    }, LinearLayout.LayoutParams(-1, tileSize).apply { bottomMargin = dp(8) })
                 }
                 val row = selectionList.getChildAt(selectionList.childCount - 1) as LinearLayout
                 val previewFrame = FrameLayout(this)
@@ -172,7 +173,7 @@ class MainActivity : Activity() {
                         refreshSelection()
                     }
                 }, FrameLayout.LayoutParams(dp(36), dp(36), Gravity.TOP or Gravity.END))
-                row.addView(previewFrame, LinearLayout.LayoutParams(0, -1, 1f).apply {
+                row.addView(previewFrame, LinearLayout.LayoutParams(tileSize, tileSize).apply {
                     if (column > 0) marginStart = dp(8)
                 })
                 executor.execute {
