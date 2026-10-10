@@ -44,23 +44,23 @@ class MainActivity : Activity() {
     private fun makeContent(): View {
         val page = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(dp(24), dp(32), dp(24), dp(24))
+            setPadding(dp(16), dp(20), dp(16), dp(12))
             setBackgroundColor(0xFFF7F8FC.toInt())
         }
         page.addView(TextView(this).apply {
             text = "Image to PDF"
-            textSize = 30f
+            textSize = 28f
             setTextColor(0xFF172033.toInt())
             setTypeface(null, android.graphics.Typeface.BOLD)
         })
         page.addView(TextView(this).apply {
             text = "Turn your pictures into a PDF, in the order you choose."
-            textSize = 16f
+            textSize = 14f
             setTextColor(0xFF60697A.toInt())
-            setPadding(0, dp(8), 0, dp(28))
+            setPadding(0, dp(4), 0, dp(12))
         })
         page.addView(Button(this).apply {
-            text = "Choose images"
+            text = "Select images"
             setOnClickListener {
                 val intent = Intent(Intent.ACTION_GET_CONTENT).apply {
                     addCategory(Intent.CATEGORY_OPENABLE)
@@ -69,17 +69,25 @@ class MainActivity : Activity() {
                 }
                 startActivityForResult(intent, REQUEST_PICK_IMAGES)
             }
-        }, LinearLayout.LayoutParams(-1, dp(52)))
+        }, LinearLayout.LayoutParams(-1, dp(48)))
         selectionList = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(0, dp(20), 0, dp(16))
+            setPadding(0, dp(12), 0, dp(8))
         }
-        page.addView(selectionList)
+        val previewScroll = ScrollView(this).apply {
+            isFillViewport = true
+            addView(selectionList)
+        }
+        page.addView(previewScroll, LinearLayout.LayoutParams(-1, 0, 1f))
         progress = TextView(this).apply {
-            textSize = 14f
+            textSize = 13f
             setTextColor(0xFF60697A.toInt())
+            setPadding(0, dp(4), 0, dp(4))
         }
         page.addView(progress)
+        val actions = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+        }
         createButton = Button(this).apply {
             text = "Create PDF"
             isEnabled = false
@@ -92,18 +100,16 @@ class MainActivity : Activity() {
                 startActivityForResult(intent, REQUEST_CREATE_PDF)
             }
         }
-        val createParams = LinearLayout.LayoutParams(-1, dp(52)).apply { topMargin = dp(20) }
-        page.addView(createButton, createParams)
+        actions.addView(createButton, LinearLayout.LayoutParams(0, dp(48), 1f))
         shareButton = Button(this).apply {
-            text = "Share PDF"
-            visibility = View.GONE
+            text = "Share"
+            isEnabled = false
             setOnClickListener { lastCreatedPdf?.let { sharePdf(it) } }
         }
-        val shareParams = LinearLayout.LayoutParams(-1, dp(52)).apply { topMargin = dp(8) }
-        page.addView(shareButton, shareParams)
-        val scroll = ScrollView(this)
-        scroll.addView(page)
-        return scroll
+        val shareParams = LinearLayout.LayoutParams(0, dp(48), 1f).apply { marginStart = dp(8) }
+        actions.addView(shareButton, shareParams)
+        page.addView(actions)
+        return page
     }
 
     @Deprecated("Uses the platform document picker result API")
@@ -138,26 +144,29 @@ class MainActivity : Activity() {
         } else {
             selectionList.addView(TextView(this).apply {
                 text = "${selectedImages.size} image${if (selectedImages.size == 1) "" else "s"} selected"
-                textSize = 16f
+                textSize = 14f
                 setTextColor(0xFF30394A.toInt())
-                setPadding(0, 0, 0, dp(12))
+                setPadding(0, 0, 0, dp(8))
             })
             selectedImages.forEachIndexed { index, uri ->
-                val row = LinearLayout(this).apply {
-                    orientation = LinearLayout.HORIZONTAL
-                    gravity = Gravity.CENTER_VERTICAL
-                    setPadding(0, dp(6), 0, dp(6))
+                val column = index % 3
+                if (column == 0) {
+                    selectionList.addView(LinearLayout(this).apply {
+                        orientation = LinearLayout.HORIZONTAL
+                        tag = "preview-row"
+                    }, LinearLayout.LayoutParams(-1, dp(112)).apply { bottomMargin = dp(8) })
                 }
+                val row = selectionList.getChildAt(selectionList.childCount - 1) as LinearLayout
+                val previewFrame = FrameLayout(this)
                 val preview = ImageView(this).apply {
                     scaleType = ImageView.ScaleType.CENTER_CROP
                     setBackgroundColor(0xFFE2E6EF.toInt())
                     contentDescription = "Selected image ${index + 1}"
                 }
-                val previewFrame = FrameLayout(this)
-                previewFrame.addView(preview, FrameLayout.LayoutParams(-1, dp(220)))
+                previewFrame.addView(preview, FrameLayout.LayoutParams(-1, -1))
                 previewFrame.addView(TextView(this).apply {
                     text = "×"
-                    textSize = 28f
+                    textSize = 22f
                     gravity = Gravity.CENTER
                     setTextColor(android.graphics.Color.WHITE)
                     setBackgroundColor(0xCC172033.toInt())
@@ -166,9 +175,10 @@ class MainActivity : Activity() {
                         selectedImages.remove(uri)
                         refreshSelection()
                     }
-                }, FrameLayout.LayoutParams(dp(48), dp(48), Gravity.TOP or Gravity.END))
-                row.addView(previewFrame, LinearLayout.LayoutParams(-1, dp(220)))
-                selectionList.addView(row)
+                }, FrameLayout.LayoutParams(dp(36), dp(36), Gravity.TOP or Gravity.END))
+                row.addView(previewFrame, LinearLayout.LayoutParams(0, -1, 1f).apply {
+                    if (column > 0) marginStart = dp(8)
+                })
                 executor.execute {
                     val thumbnail = try { loadThumbnail(uri) } catch (_: Exception) { null }
                     runOnUiThread {
@@ -178,13 +188,14 @@ class MainActivity : Activity() {
             }
         }
         createButton.isEnabled = selectedImages.isNotEmpty()
+        shareButton.isEnabled = lastCreatedPdf != null
     }
 
     private fun loadThumbnail(uri: Uri): Bitmap {
         return if (android.os.Build.VERSION.SDK_INT >= 28) {
             val source = ImageDecoder.createSource(contentResolver, uri)
             ImageDecoder.decodeBitmap(source) { decoder, info, _ ->
-                val scale = 480f / maxOf(info.size.width, info.size.height)
+                val scale = 720f / maxOf(info.size.width, info.size.height)
                 decoder.setTargetSize((info.size.width * scale).toInt().coerceAtLeast(1), (info.size.height * scale).toInt().coerceAtLeast(1))
                 decoder.allocator = ImageDecoder.ALLOCATOR_SOFTWARE
             }
@@ -192,7 +203,7 @@ class MainActivity : Activity() {
             val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
             contentResolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it, null, bounds) }
                 ?: throw IOException("Unable to read image")
-            val sample = maxOf(1, maxOf(bounds.outWidth, bounds.outHeight) / 480)
+            val sample = maxOf(1, maxOf(bounds.outWidth, bounds.outHeight) / 720)
             contentResolver.openInputStream(uri)?.use {
                 BitmapFactory.decodeStream(it, null, BitmapFactory.Options().apply { inSampleSize = sample })
             } ?: throw IOException("Unable to decode image")
@@ -211,6 +222,7 @@ class MainActivity : Activity() {
     private fun writePdf(destination: Uri) {
         val images = selectedImages.toList()
         createButton.isEnabled = false
+        shareButton.isEnabled = false
         progress.text = "Creating PDF…"
         executor.execute {
             var document: PdfDocument? = null
@@ -238,7 +250,7 @@ class MainActivity : Activity() {
                     ?: throw IOException("Unable to open the selected destination")
                 runOnUiThread {
                     lastCreatedPdf = destination
-                    shareButton.visibility = View.VISIBLE
+                    shareButton.isEnabled = true
                     progress.text = "PDF created successfully."
                     Toast.makeText(this, "PDF saved", Toast.LENGTH_SHORT).show()
                     createButton.isEnabled = selectedImages.isNotEmpty()
