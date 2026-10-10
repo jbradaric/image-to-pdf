@@ -1,0 +1,16 @@
+# Gradle
+.gradle/
+**/build/
+
+# Local Android SDK path
+local.properties
+
+# IDE files
+.idea/
+*.iml
+
+# Kotlin
+.kotlin/
+
+# OS files
+.DS_Store
