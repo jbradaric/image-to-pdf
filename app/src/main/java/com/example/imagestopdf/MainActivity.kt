@@ -395,7 +395,6 @@ class MainActivity : Activity() {
                     for (x in 0 until width) {
                         val i = y * width + x
                         val gray = (Color.red(pixels[i]) * 299 + Color.green(pixels[i]) * 587 + Color.blue(pixels[i]) * 114) / 1000
-                        pixels[i] = gray
                         rowSum += gray
                         integral[(y + 1) * stride + x + 1] = integral[y * stride + x + 1] + rowSum
                     }
@@ -409,9 +408,22 @@ class MainActivity : Activity() {
                     val localSum = integral[bottom * stride + right] - integral[top * stride + right] -
                         integral[bottom * stride + left] + integral[top * stride + left]
                     val localMean = localSum / ((right - left) * (bottom - top))
-                    val gray = pixels[y * width + x] and 0xff
-                    val value = if (gray >= localMean - 12) 255 else 0
-                    pixels[y * width + x] = Color.rgb(value, value, value)
+                    val i = y * width + x
+                    val color = pixels[i]
+                    val red = Color.red(color)
+                    val green = Color.green(color)
+                    val blue = Color.blue(color)
+                    val gray = (red * 299 + green * 587 + blue * 114) / 1000
+                    val saturation = maxOf(red, green, blue) - minOf(red, green, blue)
+                    val colorProtection = 1f - 0.8f * saturation / 255f
+                    val scanGray = (255f + (gray - localMean.toFloat()) * 1.25f).coerceIn(0f, 255f)
+                    val adjustedGray = (gray + (scanGray - gray) * colorProtection).toInt()
+                    val shift = adjustedGray - gray
+                    pixels[i] = Color.rgb(
+                        (red + shift).coerceIn(0, 255),
+                        (green + shift).coerceIn(0, 255),
+                        (blue + shift).coerceIn(0, 255)
+                    )
                 }
             }
         }
@@ -492,7 +504,7 @@ class MainActivity : Activity() {
     private data class PdfImage(val uri: Uri, val filter: ImageFilter, val rotation: Int)
 
     private enum class ImageFilter(val label: String) {
-        NONE("No filter"), GRAYSCALE("Grayscale"), BLACK_AND_WHITE("Black & white"), AUTO_SCAN("Auto scan (adaptive B&W)")
+        NONE("No filter"), GRAYSCALE("Grayscale"), BLACK_AND_WHITE("Black & white"), AUTO_SCAN("Auto scan (color)")
     }
 
     companion object {
