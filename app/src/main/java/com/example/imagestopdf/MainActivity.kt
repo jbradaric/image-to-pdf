@@ -414,6 +414,7 @@ class MainActivity : Activity() {
                     decoder.setTargetSize((info.size.width * scale).toInt().coerceAtLeast(1), (info.size.height * scale).toInt().coerceAtLeast(1))
                 }
                 decoder.allocator = ImageDecoder.ALLOCATOR_SOFTWARE
+                decoder.setMutableRequired(true)
             }
         } else {
             val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
@@ -422,7 +423,10 @@ class MainActivity : Activity() {
             var sample = 1
             while (maxOf(bounds.outWidth, bounds.outHeight) / sample > maxDimension) sample *= 2
             contentResolver.openInputStream(uri)?.use {
-                BitmapFactory.decodeStream(it, null, BitmapFactory.Options().apply { inSampleSize = sample })
+                BitmapFactory.decodeStream(it, null, BitmapFactory.Options().apply {
+                    inSampleSize = sample
+                    inMutable = true
+                })
             } ?: throw IOException("Unable to decode image")
         }
     }
