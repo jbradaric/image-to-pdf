@@ -122,6 +122,20 @@ class MainActivity : Activity() {
         val shareParams = LinearLayout.LayoutParams(0, dp(48), 1f).apply { marginStart = dp(8) }
         actions.addView(shareButton, shareParams)
         page.addView(actions)
+        if (android.os.Build.VERSION.SDK_INT >= 35) {
+            page.setOnApplyWindowInsetsListener { view, insets ->
+                val systemInsets = insets.getInsets(
+                    android.view.WindowInsets.Type.systemBars() or android.view.WindowInsets.Type.displayCutout()
+                )
+                view.setPadding(
+                    dp(16) + systemInsets.left,
+                    dp(20) + systemInsets.top,
+                    dp(16) + systemInsets.right,
+                    dp(12) + systemInsets.bottom
+                )
+                insets
+            }
+        }
         return page
     }
 
