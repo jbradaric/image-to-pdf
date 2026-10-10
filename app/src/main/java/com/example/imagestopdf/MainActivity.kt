@@ -7,8 +7,10 @@ import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.Color
 import android.graphics.ImageDecoder
+import android.graphics.Matrix
 import android.graphics.Paint
 import android.graphics.Rect
+import android.graphics.RectF
 import android.graphics.drawable.GradientDrawable
 import android.graphics.pdf.PdfDocument
 import android.net.Uri
@@ -31,6 +33,7 @@ class MainActivity : Activity() {
     private val executor = Executors.newSingleThreadExecutor()
     private val selectedImages = mutableListOf<Uri>()
     private val imageFilters = mutableMapOf<Uri, ImageFilter>()
+    private val imageRotations = mutableMapOf<Uri, Int>()
     private lateinit var selectionList: LinearLayout
     private lateinit var createButton: Button
     private lateinit var shareButton: Button
@@ -212,6 +215,23 @@ class MainActivity : Activity() {
                         }
                     }
                 })
+                val rotationControl = TextView(this).apply {
+                    gravity = Gravity.CENTER
+                    textSize = 16f
+                    setTextColor(if (isDarkMode()) 0xFFE2E2E9.toInt() else 0xFF30394A.toInt())
+                }
+                fun updateRotationLabel() {
+                    val rotation = imageRotations[uri] ?: 0
+                    rotationControl.text = "↻\n${rotation}°"
+                    preview.rotation = rotation.toFloat()
+                    rotationControl.contentDescription = "Rotate image ${index + 1}; currently rotated $rotation degrees"
+                }
+                updateRotationLabel()
+                rotationControl.setOnClickListener {
+                    imageRotations[uri] = ((imageRotations[uri] ?: 0) + 90) % 360
+                    updateRotationLabel()
+                }
+                row.addView(rotationControl, LinearLayout.LayoutParams(dp(44), dp(48)))
                 row.addView(TextView(this).apply {
                     text = "×"
                     textSize = 26f
@@ -221,6 +241,7 @@ class MainActivity : Activity() {
                     setOnClickListener {
                         selectedImages.remove(uri)
                         imageFilters.remove(uri)
+                        imageRotations.remove(uri)
                         refreshSelection()
                     }
                 }, LinearLayout.LayoutParams(dp(40), dp(48)))
@@ -265,7 +286,9 @@ class MainActivity : Activity() {
     } catch (_: Exception) { uri.lastPathSegment ?: "Image" }
 
     private fun writePdf(destination: Uri) {
-        val images = selectedImages.map { it to (imageFilters[it] ?: ImageFilter.NONE) }
+        val images = selectedImages.map {
+            PdfImage(it, imageFilters[it] ?: ImageFilter.NONE, imageRotations[it] ?: 0)
+        }
         createButton.isEnabled = false
         shareButton.isEnabled = false
         progress.text = "Creating PDF…"
@@ -273,10 +296,18 @@ class MainActivity : Activity() {
             var document: PdfDocument? = null
             try {
                 document = PdfDocument()
-                images.forEachIndexed { index, (uri, filter) ->
-                    val bitmap = loadBitmap(uri, PDF_RENDER_MAX_DIMENSION)
+                images.forEachIndexed { index, image ->
+                    var bitmap = loadBitmap(image.uri, PDF_RENDER_MAX_DIMENSION)
                     try {
-                        if (filter != ImageFilter.NONE) applyFilter(bitmap, filter)
+                        if (image.filter != ImageFilter.NONE) applyFilter(bitmap, image.filter)
+                        if (image.rotation != 0) {
+                            val rotated = Bitmap.createBitmap(
+                                bitmap, 0, 0, bitmap.width, bitmap.height,
+                                Matrix().apply { postRotate(image.rotation.toFloat()) }, true
+                            )
+                            bitmap.recycle()
+                            bitmap = rotated
+                        }
                         val pageWidth = 595
                         val pageHeight = 842
                         val page = document.startPage(PdfDocument.PageInfo.Builder(pageWidth, pageHeight, index + 1).create())
@@ -285,7 +316,7 @@ class MainActivity : Activity() {
                         val height = (bitmap.height * scale).toInt()
                         val left = (pageWidth - width) / 2
                         val top = (pageHeight - height) / 2
-                        page.canvas.drawColor(android.graphics.Color.WHITE)
+                        page.canvas.drawColor(Color.WHITE)
                         page.canvas.drawBitmap(bitmap, null, Rect(left, top, left + width, top + height), Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG))
                         document.finishPage(page)
                     } finally {
@@ -425,6 +456,8 @@ class MainActivity : Activity() {
             android.content.res.Configuration.UI_MODE_NIGHT_YES
 
     private fun dp(value: Int): Int = (value * resources.displayMetrics.density).toInt()
+
+    private data class PdfImage(val uri: Uri, val filter: ImageFilter, val rotation: Int)
 
     private enum class ImageFilter(val label: String) {
         NONE("No filter"), GRAYSCALE("Grayscale"), BLACK_AND_WHITE("Black & white"), AUTO_SCAN("Auto scan (adaptive B&W)")
