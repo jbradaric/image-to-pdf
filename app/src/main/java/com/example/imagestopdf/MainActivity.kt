@@ -2,11 +2,13 @@ package com.example.imagestopdf
 
 import android.app.Activity
 import android.content.Intent
+import android.content.res.ColorStateList
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.ImageDecoder
 import android.graphics.Paint
 import android.graphics.Rect
+import android.graphics.drawable.GradientDrawable
 import android.graphics.pdf.PdfDocument
 import android.net.Uri
 import android.os.Bundle
@@ -66,7 +68,7 @@ class MainActivity : Activity() {
             setTextColor(if (isDarkMode()) 0xFFBFC2CC.toInt() else 0xFF60697A.toInt())
             setPadding(0, dp(4), 0, dp(12))
         })
-        page.addView(Button(this).apply {
+        val selectButton = Button(this).apply {
             text = "Select images"
             setOnClickListener {
                 val intent = Intent(Intent.ACTION_GET_CONTENT).apply {
@@ -76,7 +78,9 @@ class MainActivity : Activity() {
                 }
                 startActivityForResult(intent, REQUEST_PICK_IMAGES)
             }
-        }, LinearLayout.LayoutParams(-1, dp(48)))
+        }
+        styleButton(selectButton, primary = true)
+        page.addView(selectButton, LinearLayout.LayoutParams(-1, dp(48)))
         selectionList = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(0, dp(12), 0, dp(8))
@@ -107,12 +111,14 @@ class MainActivity : Activity() {
                 startActivityForResult(intent, REQUEST_CREATE_PDF)
             }
         }
+        styleButton(createButton, primary = true)
         actions.addView(createButton, LinearLayout.LayoutParams(0, dp(48), 1f))
         shareButton = Button(this).apply {
             text = "Share"
             isEnabled = false
             setOnClickListener { lastCreatedPdf?.let { sharePdf(it) } }
         }
+        styleButton(shareButton, primary = false)
         val shareParams = LinearLayout.LayoutParams(0, dp(48), 1f).apply { marginStart = dp(8) }
         actions.addView(shareButton, shareParams)
         page.addView(actions)
@@ -297,6 +303,30 @@ class MainActivity : Activity() {
             contentResolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it) }
                 ?: throw IOException("Unable to read image")
         }
+    }
+
+    private fun styleButton(button: Button, primary: Boolean) {
+        val dark = isDarkMode()
+        val enabledColor = when {
+            primary -> 0xFF315EFB.toInt()
+            dark -> 0xFF30323B.toInt()
+            else -> 0xFFE8EDFF.toInt()
+        }
+        val disabledColor = if (dark) 0xFF292A31.toInt() else 0xFFE3E5EB.toInt()
+        button.background = GradientDrawable().apply { cornerRadius = dp(14).toFloat() }
+        button.backgroundTintList = ColorStateList(
+            arrayOf(intArrayOf(android.R.attr.state_enabled), intArrayOf()),
+            intArrayOf(enabledColor, disabledColor)
+        )
+        button.setTextColor(when {
+            primary -> android.graphics.Color.WHITE
+            dark -> 0xFFE5E5EC.toInt()
+            else -> 0xFF2448C8.toInt()
+        })
+        button.isAllCaps = false
+        button.textSize = 15f
+        button.elevation = dp(2).toFloat()
+        button.setPadding(dp(12), 0, dp(12), 0)
     }
 
     private fun isDarkMode(): Boolean =
