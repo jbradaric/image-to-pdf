@@ -28,6 +28,8 @@ class MainActivity : Activity() {
     private val selectedImages = mutableListOf<Uri>()
     private lateinit var selectionList: LinearLayout
     private lateinit var createButton: Button
+    private lateinit var shareButton: Button
+    private var lastCreatedPdf: Uri? = null
     private lateinit var progress: TextView
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -92,6 +94,13 @@ class MainActivity : Activity() {
         }
         val createParams = LinearLayout.LayoutParams(-1, dp(52)).apply { topMargin = dp(20) }
         page.addView(createButton, createParams)
+        shareButton = Button(this).apply {
+            text = "Share PDF"
+            visibility = View.GONE
+            setOnClickListener { lastCreatedPdf?.let { sharePdf(it) } }
+        }
+        val shareParams = LinearLayout.LayoutParams(-1, dp(52)).apply { topMargin = dp(8) }
+        page.addView(shareButton, shareParams)
         val scroll = ScrollView(this)
         scroll.addView(page)
         return scroll
@@ -228,6 +237,8 @@ class MainActivity : Activity() {
                 contentResolver.openOutputStream(destination)?.use { document.writeTo(it) }
                     ?: throw IOException("Unable to open the selected destination")
                 runOnUiThread {
+                    lastCreatedPdf = destination
+                    shareButton.visibility = View.VISIBLE
                     progress.text = "PDF created successfully."
                     Toast.makeText(this, "PDF saved", Toast.LENGTH_SHORT).show()
                     createButton.isEnabled = selectedImages.isNotEmpty()
@@ -240,6 +251,20 @@ class MainActivity : Activity() {
             } finally {
                 document?.close()
             }
+        }
+    }
+
+    private fun sharePdf(uri: Uri) {
+        val sendIntent = Intent(Intent.ACTION_SEND).apply {
+            type = "application/pdf"
+            putExtra(Intent.EXTRA_STREAM, uri)
+            clipData = android.content.ClipData.newUri(contentResolver, "PDF", uri)
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        }
+        try {
+            startActivity(Intent.createChooser(sendIntent, "Share PDF"))
+        } catch (_: Exception) {
+            Toast.makeText(this, "No app available to share this PDF", Toast.LENGTH_SHORT).show()
         }
     }
 
