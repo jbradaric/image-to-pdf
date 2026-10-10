@@ -44,12 +44,22 @@ class MainActivity : Activity() {
             setPadding(dp(16), dp(20), dp(16), dp(12))
             setBackgroundColor(if (isDarkMode()) 0xFF121318.toInt() else 0xFFF7F8FC.toInt())
         }
-        page.addView(TextView(this).apply {
+        val heading = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+        }
+        heading.addView(ImageView(this).apply {
+            setImageResource(R.drawable.ic_app_logo)
+            contentDescription = "Image to PDF logo"
+        }, LinearLayout.LayoutParams(dp(48), dp(48)))
+        heading.addView(TextView(this).apply {
             text = "Image to PDF"
             textSize = 28f
             setTextColor(if (isDarkMode()) 0xFFF1F0F7.toInt() else 0xFF172033.toInt())
             setTypeface(null, android.graphics.Typeface.BOLD)
+            setPadding(dp(12), 0, 0, 0)
         })
+        page.addView(heading)
         page.addView(TextView(this).apply {
             text = "Turn your pictures into a PDF, in the order you choose."
             textSize = 14f
