@@ -34,6 +34,7 @@ class MainActivity : Activity() {
     private val selectedImages = mutableListOf<Uri>()
     private val imageFilters = mutableMapOf<Uri, ImageFilter>()
     private val imageRotations = mutableMapOf<Uri, Int>()
+    private val previewVersions = mutableMapOf<Uri, Int>()
     private lateinit var selectionList: LinearLayout
     private lateinit var createButton: Button
     private lateinit var shareButton: Button
@@ -211,10 +212,13 @@ class MainActivity : Activity() {
                     onItemSelectedListener = object : android.widget.AdapterView.OnItemSelectedListener {
                         override fun onNothingSelected(parent: android.widget.AdapterView<*>?) = Unit
                         override fun onItemSelected(parent: android.widget.AdapterView<*>?, view: View?, position: Int, id: Long) {
-                            imageFilters[uri] = ImageFilter.entries[position]
+                            val filter = ImageFilter.entries[position]
+                            imageFilters[uri] = filter
+                            renderPreview(uri, preview, filter)
                         }
                     }
                 })
+                renderPreview(uri, preview, imageFilters[uri] ?: ImageFilter.NONE)
                 val rotationControl = TextView(this).apply {
                     gravity = Gravity.CENTER
                     textSize = 16f
@@ -242,19 +246,39 @@ class MainActivity : Activity() {
                         selectedImages.remove(uri)
                         imageFilters.remove(uri)
                         imageRotations.remove(uri)
+                        previewVersions[uri] = (previewVersions[uri] ?: 0) + 1
                         refreshSelection()
                     }
                 }, LinearLayout.LayoutParams(dp(40), dp(48)))
-                executor.execute {
-                    val thumbnail = try { loadThumbnail(uri) } catch (_: Exception) { null }
-                    runOnUiThread {
-                        if (thumbnail != null && preview.parent != null) preview.setImageBitmap(thumbnail)
-                    }
-                }
             }
         }
         createButton.isEnabled = selectedImages.isNotEmpty()
         shareButton.isEnabled = lastCreatedPdf != null
+    }
+
+    private fun renderPreview(uri: Uri, preview: ImageView, filter: ImageFilter) {
+        val requestVersion = (previewVersions[uri] ?: 0) + 1
+        previewVersions[uri] = requestVersion
+        executor.execute {
+            var thumbnail: Bitmap? = null
+            try {
+                thumbnail = loadThumbnail(uri)
+                if (filter != ImageFilter.NONE) applyFilter(thumbnail, filter)
+            } catch (_: Exception) {
+                thumbnail?.recycle()
+                thumbnail = null
+            }
+            val result = thumbnail
+            runOnUiThread {
+                if (result != null) {
+                    if (previewVersions[uri] == requestVersion && preview.parent != null) {
+                        preview.setImageBitmap(result)
+                    } else {
+                        result.recycle()
+                    }
+                }
+            }
+        }
     }
 
     private fun loadThumbnail(uri: Uri): Bitmap {
@@ -264,6 +288,7 @@ class MainActivity : Activity() {
                 val scale = 720f / maxOf(info.size.width, info.size.height)
                 decoder.setTargetSize((info.size.width * scale).toInt().coerceAtLeast(1), (info.size.height * scale).toInt().coerceAtLeast(1))
                 decoder.allocator = ImageDecoder.ALLOCATOR_SOFTWARE
+                decoder.setMutableRequired(true)
             }
         } else {
             val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
@@ -271,7 +296,10 @@ class MainActivity : Activity() {
                 ?: throw IOException("Unable to read image")
             val sample = maxOf(1, maxOf(bounds.outWidth, bounds.outHeight) / 720)
             contentResolver.openInputStream(uri)?.use {
-                BitmapFactory.decodeStream(it, null, BitmapFactory.Options().apply { inSampleSize = sample })
+                BitmapFactory.decodeStream(it, null, BitmapFactory.Options().apply {
+                    inSampleSize = sample
+                    inMutable = true
+                })
             } ?: throw IOException("Unable to decode image")
         }
     }
